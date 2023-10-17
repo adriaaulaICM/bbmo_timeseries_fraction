@@ -1,0 +1,278 @@
+---
+title: "Alpha,Beta analysis"
+author: "Adrià Auladell Martín"
+output:
+  pdf_document: 
+    highlight: zenburn
+  html_document: default
+---
+
+#Packages
+```{r, message=FALSE, warning=FALSE}
+library(vegan)
+library(tidyverse)
+library(phyloseq)
+library(patchwork)
+
+```
+
+# Output of the script
+
+```{r}
+
+dir.create(file.path('../results/figures/betadiv'), showWarnings = FALSE)
+
+```
+
+#Data import
+
+```{r}
+bl.phy <- readRDS("../data/robjects/blphyloseq.rds") 
+source("sourcefiles/params-graphs.R") 
+source("sourcefiles/main_functions.R")
+source('sourcefiles/timeseries_functions.R')
+
+physeq.list <- data_transformation(bl.phy)
+
+bl.phy.relab <- physeq.list$relab
+bl.phy.raref <- physeq.list$raref
+bl.phy.log <- physeq.list$log
+bl.phy.clr <- physeq.list$clr
+
+# since the list is quite big let's erase it
+physeq.list <- NULL
+```
+
+## Unusual samples
+```{r}
+un.sam <- readRDS('../data/robjects/unusual_samples')
+
+```
+
+# Time decay 
+
+Since it is done for rarefied data all the unusual species (below 1%)
+in most of the cases will not appear.
+
+
+## Raref
+
+### Bray 
+```{r}
+
+bl.phy.0.2 <- subset_samples(bl.phy.raref, fraction == 0.2) %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .)
+
+bl.phy.3 <- subset_samples(bl.phy.raref, fraction == 3) %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .) 
+
+plot.bray <- timedecay_plot(bl.phy.0.2) +
+  ggtitle('FL fraction') + 
+  coord_cartesian(ylim = c(0,1)) + 
+  xlab(NULL)  +
+  timedecay_plot(bl.phy.3) + 
+  coord_cartesian(ylim = c(0,1)) + 
+  ggtitle('PA fraction') + 
+  plot_layout(ncol = 1)
+
+plot.bray
+ggsave(plot = plot.bray,
+       "../results/figures/betadiv/timedecay_bray_bothfrac_raref.pdf",
+       width = 9, height = 7)
+```
+
+#### Calculating range 
+
+```{r}
+
+calculate_margins <- function(physeq,distance, is.diss = T){
+  
+  dist.df <- as.data.frame(as.matrix(distance(physeq, method=distance)))
+  
+  ## Add some flavours to the mixxxxx
+  dist.df$rwname <- rownames(dist.df)
+  dist.df$rwseason <- get_variable(physeq, "season")
+  dist.df$julian <- julian(get_variable(physeq, "Date"))
+  
+  # Put it in a nice way
+  dist.df.tidied = dist.df %>%
+    gather(clname,value,-rwname,-rwseason, -julian)
+  
+  match.julian <- data.frame(rwname =dist.df$rwname,
+                             cljulian= dist.df$julian)
+  
+  dist.df.tidied <- merge(dist.df.tidied,match.julian,
+                          by.x='clname',by.y='rwname')
+  
+  julian.df <- dist.df.tidied[,c(6,4,5)]
+  
+  # Calculate the day difference, and convert it to month
+  # Any value above 0 is converted to 0 month!
+  julian.df$diff_julian <- floor((julian.df$cljulian -
+                                    julian.df$julian)/30)
+  
+  # And calculate from each the final values
+  julian.df <- julian.df %>%
+    filter(diff_julian > 0) %>% 
+    arrange(diff_julian) %>% 
+    mutate(x=diff_julian,
+           y  = value)
+  
+  if(is.diss){
+    julian.df$value = 1 - julian.df$value
+    julian.df$y = 1 - julian.df$y
+  }
+  
+  
+  # Add the error bars
+  diss.sum <- julian.df %>%
+    group_by(diff_julian) %>% 
+    dplyr::summarize(mean = mean(value),
+                     ci = qt(0.95,
+                             df=length(value)-1)*
+                       sd(value)/sqrt(length(value)))
+  
+  # Maximuns
+  print(
+    diss.sum[c(0,seq(0,59,12)),] %>% 
+      pull(mean) %>% 
+      mean()
+  )
+  # Minimums
+  print(
+    diss.sum[c(seq(6,59,12)),] %>% 
+      pull(mean) %>% 
+      mean()
+  )
+  # Mean 
+  print(
+    diss.sum[1:60,] %>% 
+      pull(mean) %>% 
+      mean()
+  )
+  
+}
+
+calculate_margins(bl.phy.0.2, distance = 'bray')
+calculate_margins(bl.phy.3, distance = 'bray')
+```
+
+
+### Unifrac
+
+```{r}
+
+plot.wunifrac <- timedecay_plot(bl.phy.0.2,distance = 'wunifrac') +
+  coord_cartesian(ylim = c(0.4,1)) + 
+  xlab(NULL)  +
+  ggtitle('FL fraction') + 
+  timedecay_plot(bl.phy.3, distance = 'wunifrac') + 
+  coord_cartesian(ylim = c(0.4,1)) + 
+  ggtitle('PA fraction') + 
+  plot_layout(ncol = 1)
+
+plot.wunifrac
+
+ggsave(plot = plot.wunifrac,
+       "../results/figures/betadiv/timedecay_wunifrac_bothfrac_raref.pdf",
+       width = 9, height = 7)
+
+
+plot.unifrac <- timedecay_plot(bl.phy.0.2,distance = 'unifrac') +
+  xlab(NULL)  +
+  ggtitle('FL fraction') + 
+  coord_cartesian(ylim = c(0.2,0.7)) + 
+  timedecay_plot(bl.phy.3, distance = 'unifrac') + 
+  coord_cartesian(ylim = c(0.2,0.7)) + 
+  ggtitle('PA fraction') + 
+  plot_layout(ncol = 1)
+
+plot.unifrac
+
+ggsave(plot = plot.unifrac,
+       "../results/figures/betadiv/timedecay_unifrac_bothfrac_raref.pdf",
+       width = 9, height = 7)
+```
+
+
+#### Range 
+
+```{r}
+calculate_margins(bl.phy.0.2, distance = 'wunifrac')
+calculate_margins(bl.phy.3, distance = 'wunifrac')
+
+```
+
+## Clr based  
+
+```{r}
+
+bl.phy.clr.0.2 <- subset_samples(bl.phy.clr, fraction == 0.2) %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .)
+
+bl.phy.clr.3 <- subset_samples(bl.phy.clr, fraction == 3) %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .) 
+
+
+
+plot.clr <- timedecay_plot(bl.phy.clr.0.2, distance = 'euclidean', is.diss = F) +
+  xlab(NULL)  +
+  coord_cartesian(ylim = c(20,100)) + 
+  ggtitle('Fraction 0.2') + 
+  timedecay_plot(bl.phy.clr.3, distance = 'euclidean', is.diss = F) + 
+  coord_cartesian(ylim = c(20,100)) + 
+  ggtitle('Fraction 3') + 
+  plot_layout(ncol = 1)
+
+plot.clr
+ggsave(plot = plot.clr,
+       "../results/figures/betadiv/timedecay_euclid_bothfrac_clr.pdf",
+       width = 9, height = 7)
+```
+
+# Composition 
+
+```{r}
+
+composition <- timedecay_plot(bl.phy.0.2) +
+  ggtitle('FL fraction') + 
+  coord_cartesian(ylim = c(0,1)) + 
+  xlab(NULL)  +
+  timedecay_plot(bl.phy.3) + 
+  coord_cartesian(ylim = c(0,1)) + 
+  ggtitle('PA fraction') + 
+  xlab(NULL)  +
+  timedecay_plot(bl.phy.0.2,distance = 'unifrac') +
+  xlab(NULL)  +
+  ggtitle('FL fraction') + 
+  coord_cartesian(ylim = c(0.2,0.7)) + 
+  timedecay_plot(bl.phy.3, distance = 'unifrac') + 
+  coord_cartesian(ylim = c(0.2,0.7)) + 
+  ggtitle('PA fraction') + 
+  plot_layout(ncol = 1) 
+
+ggsave(plot = composition,
+       filename = '../results/figures/betadiv/timedecay_composition.pdf',
+       width = 7, 
+       height = 10)
+
+```
+
+# Reviewers edition: timedecay with only the taxa with pan index > 0.7
+
+```{r}
+tax <- as(tax_table(bl.phy.3), 'matrix') %>% 
+  data.frame(asv = taxa_names(bl.phy.3))
+
+cooltaxa <- tax %>% 
+  mutate(pan.index = as.double(as.character(pan.index))) %>% 
+  filter(pan.index > 0.7) %>% 
+  pull(asv)
+
+
+timedecay_plot(subset_taxa(bl.phy.3, taxa_names(bl.phy.3) %in% cooltaxa)) + 
+  coord_cartesian(ylim = c(0,1)) + 
+  ggtitle('Fraction 3') 
+
+```
+

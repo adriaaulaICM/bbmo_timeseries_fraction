@@ -1,0 +1,413 @@
+---
+title: "Dataset integration"
+output:
+  pdf_document: 
+    highlight: zenburn
+  html_document: default
+---
+
+#Packages
+
+```{r, message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(dada2)
+library(phyloseq)
+library(ape)
+
+```
+
+## Source 
+
+Some scripts with parameters created beforehand! 
+
+```{r}
+
+source('sourcefiles/timeseries_functions.R')
+source('sourcefiles/main_functions.R')
+
+# And additional parameters for both ggplot and factor generation 
+source('sourcefiles/params-graphs.R')
+
+```
+
+
+# ASV_table
+
+```{r}
+asv.tab.raw <- readRDS('../data/abund-tax-raw/devotes_all_seqtab_final.rds')
+
+
+# Now it will be implemented in the dada2 generation script, but since this data
+# doesn't have the filter we need to include it
+asv.tab <- asv.tab.raw[,nchar(colnames(asv.tab.raw)) %in% seq(400,450)]
+
+# We extract the asv seqs and save it as a fasta
+uniquesToFasta(asv.tab,
+               "../data/abund-tax-raw/asv_Blanes_16S.fasta",
+              ids = paste0("asv",
+                           c(1:ncol(asv.tab)),
+                           ";size=",
+                           colSums(asv.tab))) 
+
+# We put again a name to the sequence table
+colnames(asv.tab) <- str_c("asv", seq(1,ncol(asv.tab)))
+
+```
+
+# Taxonomy table
+
+```{r}
+
+tax.raw <- readRDS("../data/abund-tax-raw/tax_assignation.rds") %>% 
+  data.frame() %>% 
+  rownames_to_column(var = "seq") %>% 
+  mutate(asv = str_c("asv", seq(1,nrow(.)))) %>% 
+  select(-seq,everything())
+
+# We erase all the incorrect taxonomy
+tax.raw <- tax.raw %>%
+  filter(Kingdom != "Eukaryota") %>% 
+  filter(Kingdom != "Archaea") %>% 
+  filter(!(str_detect(Class,pattern = "Chloroplast"))) %>% 
+  filter(!(str_detect(Family,pattern = "Mitochondria")))
+
+```
+
+##Introduce curated classification
+
+From the initial taxonomy, we have changed (throwing off) the following groups: marinimicrobia, deltaproteobacteria, caulobacter and Xantomonadales, Vibrionales (changed to cellvibrionales).
+
+```{r}
+tax.raw$curated <- tax.raw[,"Phylum"]
+
+tax.raw <- tax.raw %>% 
+  mutate_if(is.factor, as.character) %>% 
+  mutate(curated = ifelse(Phylum %in% c("Actinobacteria", 
+                                        "Bacteroidetes", "Firmicutes",
+                                        "Cyanobacteria",  "Proteobacteria",
+                                        "Planctomycetes","Verrucomicrobia"),
+                          Phylum,"Other Bacteria"),
+         curated = ifelse(curated == "Proteobacteria",Class,curated),
+         curated = ifelse(Phylum == "Proteobacteria" &
+                            !(Class %in% c("Alphaproteobacteria",
+                                           "Gammaproteobacteria")),
+                          "Other Proteobacteria",curated),
+         curated = ifelse(curated == "Alphaproteobacteria" &
+                            Order %in% c("Rhodobacterales",
+                                         "Rhodospirillales", "Rickettsiales",
+                                         "SAR11_clade","Sphingomonadales"),
+                          Order,curated),
+         curated = ifelse(curated == "Alphaproteobacteria", "Other Alphaproteobacteria",curated),
+         curated = ifelse(curated=="Gammaproteobacteria" &
+                            Order %in% c("Alteromonadales","Cellvibrionales" ,
+                                         "Pseudomonadales", "Oceanospirillales"),
+                          Order,curated),
+         curated = ifelse(curated=="Gammaproteobacteria","Other Gammaproteobacteria",curated),
+         curated = ifelse(curated=="Bacteroidetes" &
+                            Class == "Flavobacteriia", Class,curated),
+         curated = ifelse(curated=="Bacteroidetes" &
+                            Class == "Sphingobacteriia", Class,curated),
+         curated = ifelse(curated=="Bacteroidetes", "Other Bacteroidetes",curated),
+         curated = ifelse(curated=="Cyanobacteria" &
+                            Genus %in% c("Synechococcus"), Genus,curated),
+         curated = ifelse(curated=="Cyanobacteria","Other Cyanobacteria",curated)) 
+
+
+tax.raw$curated <- gsub("Oceanospirillales",  "Gam-Oceanospirillales", tax.raw$curated)
+tax.raw$curated <- gsub("Cellvibrionales",  "Gam-Cellvibrionales", tax.raw$curated)
+tax.raw$curated <- gsub("Alteromonadales",  "Gam-Alteromonadales", tax.raw$curated)
+tax.raw$curated <- gsub("Enterobacteriales",  "P_Gam_Enterobacteriales", tax.raw$curated)
+tax.raw$curated <- gsub("Pseudomonadales",  "P_Gam_Pseudomonadales", tax.raw$curated)
+tax.raw$curated <- gsub("Vibriorales",  "P_Gam_Vibriorales", tax.raw$curated)
+tax.raw$curated <- gsub("Sphingobacteriia",  "B_Sphingobacteriia", tax.raw$curated)
+tax.raw$curated <- gsub("Rhodobacterales",  "Alp-Rhodobacterales", tax.raw$curated)
+tax.raw$curated <- gsub("Rhodospirillales",  "P_Alp_Rhodospirillales", tax.raw$curated)
+tax.raw$curated <- gsub("SAR11_clade",  "Alp-SAR11 clade", tax.raw$curated)
+tax.raw$curated <- gsub("Sphingomonadales",  "Alp-Sphingomonadales", tax.raw$curated)
+tax.raw$curated <- gsub("Rickettsiales",  "Alp-Rickettsiales", tax.raw$curated)
+
+#With Isabel we agreed into change some of the curated levels, so I am
+#doing it here
+# rewritten 23 march 2023
+tax.raw$curated <- gsub("B_Sphingobacteriia",  "Other Bacteroidetes", tax.raw$curated)
+tax.raw$curated <- gsub( "P_Alp_Rhodospirillales", "Other Alphaproteobacteria", tax.raw$curated)
+tax.raw$curated <- gsub("P_Gam_Pseudomonadales", "Other Gammaproteobacteria", tax.raw$curated)
+
+
+tax.raw$curated <- factor(tax.raw$curated, levels = tax.order)
+
+```
+
+
+#Tidy up
+##sample indexing
+There are a lot of samples not included in the time series. With a main df we will simply select the ones of interest.
+```{r}
+#There is an NA in `Codi Ramiro`, we solve it with the ifelse
+summary.index <-
+  read_csv2("../data/metadata-raw/Summary_all_sequences_16S_Gradients_Devotes_Blanes.csv") %>%
+  select(-`...1`) %>%
+  filter(Project == "TimeSeriesBL") %>%
+  rename(ramiro_code = `Codi Ramiro`) %>%
+  filter(Code != "DEV120" , ramiro_code != "None") %>%
+  mutate(ramiro_code = ifelse(is.na(ramiro_code),
+                              str_c("16S_", Sample), ramiro_code)) 
+
+#Check if the repetitions are correct and generate a new column for names
+summary_improved <- summary.index %>%
+  separate(col = ramiro_code,
+           into = c("type", "samname", "fraction")) %>%
+  separate(col = Sample,
+           sep = "_",
+           into = c("Sample", "frac2")) %>%
+  mutate(fraction.new = ifelse(is.na(frac2) |
+                                 frac2 == "022", "0.2", "3")) %>%
+  mutate(
+    run.simpl = str_extract(Run, pattern = "[0-9]{4}"),
+    name.ok = str_c(samname, fraction.new, run.simpl, sep = "_")) 
+
+rownames(asv.tab) %>% head() 
+```
+
+Having a simplified name, we have to introduce it in the asv table. For that first we have to clean the Run and Code columns in the summary of samples. 
+
+Two samples are lost, since they dont present the fastq file for some reason. These are DEV034 (Run 4022 // BL130709) and DEV120 (Run 4021 // BL050510). Even so, we have a replicate for each.
+
+## Getting only time-series values
+
+Basically from the whole dataset we want to retrieve only the samples from the time series. 
+
+```{r}
+
+# Selection of only the samples of interest
+sam.selection <- tibble( sam = rownames(asv.tab)) %>% 
+  separate(sam, sep = "-", into = c("Run", "Code", "V3", "V4"),remove = F) %>%
+  select(-V3, -V4)
+
+sam.selection <- sam.selection %>%
+  mutate(Run = str_extract(Run, pattern = "[0-9]{4}")) %>%
+  mutate(Code = str_replace(Code, "DEV56", "DEV056"),
+         Code = str_replace(Code, "DEV58", "DEV058")) %>%
+  left_join(
+    summary_improved %>% 
+      select(Code, run.simpl, name.ok, Project),
+    by = c("Code", "Run" = "run.simpl")
+  ) %>%
+  filter(Project == "TimeSeriesBL") %>% 
+  select(name.ok, sam)
+
+asv.ts <- asv.tab[rownames(asv.tab) %in% sam.selection$sam,] %>% 
+  as_tibble(rownames = 'name.ok') 
+
+# I didn't include it in the last call because the use of 
+# mutate seemed to be a bottleneck refeered to the velocity 
+asv.ts$name.ok  <- sam.selection$name.ok
+
+
+#We need to erase all asvs with totalabundance = 0
+total.asv <- colSums(asv.ts[,-1])
+asv.above.zero <- names(which(total.asv > 0))
+
+# Taking only the correct ones both for abundance + taxonomy
+asv.ts <- asv.ts %>% 
+  select(name.ok, one_of(intersect(asv.above.zero,tax.raw$asv))) %>% 
+  arrange(name.ok)
+
+tax.ts <- tax.raw %>% 
+  filter(asv %in% colnames(asv.ts))
+
+```
+
+Finally, to be able to connect the abund table we have to modify the names of the samples so they coincide with the name given in the general metadata across the years. Sometimes the DNA is extracted or processed the next day, and this modification is not taken into account when assigning a new name. 
+
+```{r}
+
+asv.ts$name.ok <-  asv.ts$name.ok %>% 
+  str_replace_all(c(
+    "BL060704" = "BL060705",
+    "BL061010" = "BL061009",
+    "BL080311" = "BL080312",
+    "BL090521" = "BL090512",
+    "BL100412" = "BL100414",
+    "BL100413" = "BL100414",
+    "BL110704" = "BL110705",
+    "BL120518" = "BL120511",
+    "BL131204" = "BL131215"))
+
+summary_improved <- summary_improved %>% 
+  map_df( ~str_replace_all(.x,c(
+    "BL060704" = "BL060705",
+    "BL061010" = "BL061009",
+    "BL080311" = "BL080312",
+    "BL090521" = "BL090512",
+    "BL100412" = "BL100414",
+    "BL100413" = "BL100414",
+    "BL110704" = "BL110705",
+    "BL120518" = "BL120511",
+    "BL131204" = "BL131215")))
+
+```
+
+# Tree
+
+```{r}
+
+tree <- read.tree('../data/abund-tax-raw/asv_16s_tree.nw')
+TREE <- phy_tree(tree)
+
+```
+
+#Metadata
+
+```{r}
+
+dat.minimal <- read_tsv(
+  '../data/metadata-raw/metadata_Blanes_compact_may2017.tsv') %>%
+  select(-Project) %>% 
+  distinct(Sample_name, .keep_all = T) %>% 
+  # A - was inside the data and we removed forcing numeric, BEWARE!
+  mutate(Temperature = as.numeric(Temperature))
+
+DAT <- summary_improved %>% 
+  filter(name.ok %in% asv.ts$name.ok) %>% 
+  left_join(dat.minimal, by = c(samname = "Sample_name")) %>% 
+  mutate(depth=rowSums(asv.ts[,-1]),
+         name.complete =name.ok) %>% 
+  column_to_rownames(var = "name.ok") %>% 
+  select(-c(frac2,`Codi R&T R1`,`Codi R&T R2`,
+            fraction,Run,Comment,Place,Sample)) %>% 
+  rename(fraction=fraction.new,run=run.simpl) %>% 
+  sample_data()
+
+```
+
+We have erased frac2,Codi R&T R1,  Codi R&T R2, fraction,Run,Comment,Place,X1 from the dataset. 
+
+#Phyloseq 
+
+```{r}
+ASV <- as.matrix(asv.ts %>% column_to_rownames(var="name.ok")) %>% 
+  otu_table(taxa_are_rows = F)
+
+TAX <- as.matrix(tax.ts %>% column_to_rownames(var="asv")) %>%
+                   tax_table()
+
+bl.phy <- phyloseq(ASV,TAX,DAT,TREE) 
+
+bl.phy <- subset_samples(bl.phy, sample_sums(bl.phy) != 0)
+
+# We remove the possible singletons, only 3 ASVs
+bl.phy <- subset_taxa(bl.phy, taxa_sums(bl.phy) > 1)
+
+```
+
+Sample BL080602_0.2 has not amplified correctly, regrettably. A count of 0 is not a good representation of the community structure. 
+
+# Removal of samples
+
+We also need to remove some of the samples
+And we basically will work with 2004 to 2009 samples. 
+
+```{r}
+erase <- readxl::read_xlsx("../data/metadata-raw/sample_selection.xlsx",
+                           col_names = c('sam', 'reads', 'status')) %>% 
+  filter(status == "Keep") %>% 
+  pull(sam)
+ 
+# Erasing 2010-2014 samples!
+
+#We save this file since it will be useful afterwards 
+phylo.rem <- prune_samples(erase, bl.phy)
+saveRDS(phylo.rem,file = '../data/robjects/blphy10years.rds')
+      
+
+phylo.rem <- subset_samples(phylo.rem, year < 2010) 
+
+taxa.remove <- names(which(taxa_sums(phylo.rem) > 0 ))
+phylo.rem <- prune_taxa(taxa.remove,phylo.rem)
+
+phylo.rem
+
+```
+
+
+#Pan index calculation
+Abundance weighted mean related to the preference for a medium or the other.
+
+```{r}
+phylo.raref <- rarefy_even_depth(phylo.rem)
+
+abund.raref <- as(otu_table(phylo.raref), "matrix") %>% as.data.frame() 
+tax.raref <- as(tax_table(phylo.raref), 'matrix') %>%
+  data.frame() %>% 
+  rownames_to_column(var = "asv")
+
+library(EcolUtils)
+library(vegan)
+
+fraction <- decostand(as.numeric(sample_data(phylo.raref)$fraction),
+                      "range")
+
+# To change in case there is major modifications 
+nich.df <- niche.val(abund.raref, fraction, n = 1000)
+
+pan <- nich.df %>% 
+  rownames_to_column(var = "asv") %>%
+  dplyr::rename( pan.index = observed) 
+
+tax.ts <- tax.raref %>% 
+  left_join(pan, by = "asv") %>% 
+  mutate(taxsums = taxa_sums(phylo.raref)) 
+
+```
+
+```{r}
+pan.index.plot <- function(df){
+  df %>% 
+    ggplot(aes(curated,pan.index)) +
+    geom_jitter(alpha = 0.8, color = "grey") +
+    geom_violin(aes(fill = curated), 
+                scale = "width",
+                draw_quantiles = 0.5, alpha = 0.8) +
+    coord_flip() + 
+    scale_x_discrete(limits = rev(tax.order)) +
+    guides(fill = F) +
+    xlab("Taxonomy curated") +
+    ylab( "Particle-Association Niche (PAN) index" ) +
+    bac.fillScale
+}
+
+
+
+tax.ts %>% 
+  filter(sign != "NON SIGNIFICANT") %>% 
+  filter(taxsums  > 10) %>%
+  pan.index.plot()
+
+
+ ggsave("../results/figures/pan_distribution_sum10_nonsignificant.pdf",
+        width = 6, height = 7)
+
+```
+
+## Save the pan.index
+
+```{r}
+
+pan.df <- tax.ts %>% 
+  filter(taxsums > 10) %>% 
+  filter(sign != "NON SIGNIFICANT") %>% 
+  select(asv, pan.index)
+  
+tax.new <- data.frame(as(tax_table(phylo.rem), 'matrix')) %>%
+  rownames_to_column(var = "asv") %>% 
+  left_join(pan.df, by = "asv") %>% 
+  column_to_rownames(var = "asv") %>% 
+  as.matrix() %>% 
+  tax_table()
+  
+phylo.rem.pan <- merge_phyloseq(phylo.rem, tax.new)
+
+write_rds(phylo.rem.pan, path = "../data/robjects/blphyloseq.rds")  
+```

@@ -1,0 +1,242 @@
+---
+title: "Alpha,Beta analysis"
+author: "Adrià Auladell Martín"
+output:
+  pdf_document: 
+    highlight: zenburn
+  html_document: default
+---
+
+#Packages
+```{r, message=FALSE, warning=FALSE}
+library(vegan)
+library(tidyverse)
+library(phyloseq)
+library(ggrepel)
+library(patchwork)
+library(scales)
+library(lubridate)
+library(lomb)
+```
+
+# Output of the script
+
+```{r}
+
+dir.create(file.path('../results/figures/timeseries'), showWarnings = FALSE)
+
+```
+
+#Data import
+
+```{r}
+bl.phy <- readRDS("../data/robjects/blphyloseq.rds") 
+
+bl.phy <- filter_taxa(bl.phy, function(x) sum(x > 5) > 5, TRUE)
+
+source("sourcefiles/params-graphs.R") 
+source("sourcefiles/main_functions.R")
+
+# Apart from the typical source of functions, we add the timeseries specific
+source('sourcefiles/timeseries_functions.R')
+
+physeq.list <- data_transformation(bl.phy)
+
+bl.phy.relab <- physeq.list$relab
+bl.phy.raref <- physeq.list$raref
+bl.phy.log <- physeq.list$log
+bl.phy.clr <- physeq.list$clr
+bl.phy.asinh <- transform_sample_counts(bl.phy, function(x) asinh(x))
+
+# since the list is quite big let's erase it
+physeq.list <- NULL
+
+tax <- as(tax_table(bl.phy), 'matrix') %>% 
+  data.frame(asv = rownames(.)) %>% 
+  mutate_if(.predicate = is.factor,.funs = as.character)
+
+psmelt.relab <- psmelt_dplyr(bl.phy.relab)
+psmelt.clr <- psmelt_dplyr(bl.phy.clr)
+```
+
+
+# Preprocessing
+
+##Separate the two time series
+
+Now we have to differentiate between the time series with both fractions, since we have to calculate the seasonality signal for each fraction separately. 
+
+```{r}
+
+bl.phy.0.2 <- subset_samples(bl.phy, fraction == '0.2') %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .)
+
+bl.phy.3 <- subset_samples(bl.phy, fraction == '3') %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .)
+
+# The rarefied counterparts
+bl.phy.0.2.raref <- rarefy_even_depth(bl.phy.0.2,rngseed = 42)
+bl.phy.3.raref <- rarefy_even_depth(bl.phy.3,rngseed = 42)
+
+psm.bl.phy.0.2.raref <- psmelt_dplyr(bl.phy.0.2.raref)
+psm.bl.phy.3.raref <- psmelt_dplyr(bl.phy.3.raref)
+```
+
+## Check completeness 
+
+```{r}
+
+# The 0.2 fraction presents all the data correctly
+
+samdat.02 <- data.frame(sample_data(bl.phy.0.2)) 
+
+samdat.02 %>% 
+  .$year %>% 
+  table()
+
+samdat.02 %>% 
+  .$month %>% 
+  table()
+
+samdat.3 <- data.frame(sample_data(bl.phy.3))
+
+# There are some months lacking in the 3 fraction
+samdat.3 %>% 
+  .$year %>% 
+  table()
+
+table(samdat.3$year, samdat.3$month)
+```
+
+By looking at the data, we have the following samples unsampled:
+
+- March 2004. 
+- February 2005 , May 2005. 
+
+We need to create a big df with all the information, and fill with NAs.
+
+# Data preparation
+
+## Filtering by occurrence 
+```{r}
+asvs.abundant02 <- readRDS('../data/robjects/asv_preval_02.rds') %>% 
+  filter(behavior %in% c('Broad', 'Other')) %>% 
+  pull(asv)
+
+asvs.abundant3 <- readRDS('../data/robjects/asv_preval_3.rds') %>% 
+  filter(behavior %in% c('Broad', 'Other')) %>% 
+  pull(asv)
+
+
+tsdf.0.2 <- transform_sample_counts(bl.phy.0.2, function(x) asinh(x)) %>% 
+  prune_taxa(asvs.abundant02, . ) %>% 
+  psmelt_dplyr() %>% 
+  mutate(decimaldat = decimal_date(Date)) 
+
+bl.phy.clr.02 <- subset_samples(bl.phy.clr, fraction == '0.2')
+
+tsdf.0.2.clr <- bl.phy.clr.02 %>% 
+  prune_taxa(asvs.abundant02, . ) %>% 
+  psmelt_dplyr() %>% 
+  mutate(decimaldat = decimal_date(Date)) 
+
+tsdf.3 <- transform_sample_counts(bl.phy.3, function(x) asinh(x)) %>% 
+  prune_taxa(asvs.abundant3, . ) %>% 
+  psmelt_dplyr() %>% 
+  mutate(decimaldat = decimal_date(Date))
+
+bl.phy.clr.3 <- subset_samples(bl.phy.clr, fraction == '3')
+
+tsdf.3.clr <- bl.phy.clr.3 %>% 
+  prune_taxa(asvs.abundant3, . ) %>% 
+  psmelt_dplyr() %>% 
+  mutate(decimaldat = decimal_date(Date)) 
+
+
+
+```
+
+
+
+# Lombscargle 
+
+### 0.2 fraction 
+
+```{r}
+
+df.ts <- tsdf.0.2.clr %>% 
+  arrange(Date) %>% 
+  select(Date, decimaldat, Abundance, OTU) %>% 
+  split(.$OTU, drop = T)
+
+
+  
+lomb.02  <-  df.ts %>% 
+  map(~randlsp( x =.x$Abundance,
+                times = .x$decimaldat,
+                type = 'period',
+                plot = F))
+
+lomb.sea.02 <- tibble( asv = names(lomb.02),
+                       pval = map_dbl(lomb.02, ~.x$p.value),
+                       peak = map_dbl(lomb.02, ~.x$peak),
+                       interval  = map(lomb.02, ~.x$peak.at) )   %>% 
+  filter(pval <= 0.01, peak >= 10)   %>% 
+  pull(asv)
+
+
+results.lomb02 <- lomb.02[lomb.sea.02]
+
+map(results.lomb02, ~tibble( scanned = .x$scanned,
+                          power = .x$power)) %>% 
+  bind_rows(.id = 'asv') %>% 
+  ggplot(aes(scanned, power)) + 
+  geom_line(aes(group = asv)) + 
+  facet_wrap(~asv) + 
+  lil.strip
+```
+
+### 3 fraction 
+
+```{r message=FALSE}
+
+df.ts <- tsdf.3 %>% 
+  arrange(Date) %>% 
+  select(decimaldat, Abundance, OTU) %>% 
+  split(.$OTU, drop = T)
+
+  
+lomb.3  <-  df.ts %>% 
+  map(~randlsp( x =.x$Abundance,
+                times = .x$decimaldat,
+                type = 'period',
+                plot = F))
+
+lomb.sea.3 <- tibble( asv = names(lomb.3),
+                      pval = map_dbl(lomb.3, ~.x$p.value), 
+                      peak = map_dbl(lomb.3, ~.x$peak),
+                      interval  = map(lomb.3, ~.x$peak.at) ) %>% 
+  filter(pval <= 0.01, peak >= 10)   %>% 
+  pull(asv)
+
+results.lomb03 <- lomb.3[lomb.sea.3]
+
+map(results.lomb03, ~tibble( scanned = .x$scanned,
+                          power = .x$power)) %>% 
+  bind_rows(.id = 'asv') %>% 
+  ggplot(aes(scanned, power)) + 
+  geom_line(aes(group = asv)) + 
+  facet_wrap(~asv) + 
+  theme_bw(base_size = 10) + 
+  lil.strip
+
+```
+
+# Saving 
+
+```{r}
+
+saveRDS(lomb.02, "../data/robjects/results_ts_lomb02.rds")
+saveRDS(lomb.3, "../data/robjects/results_ts_lomb3.rds")
+
+```

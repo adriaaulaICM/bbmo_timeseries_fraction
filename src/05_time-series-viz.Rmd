@@ -1,0 +1,320 @@
+---
+title: "Alpha,Beta analysis"
+author: "Adrià Auladell Martín"
+date: "2 de febrero de 2017"
+output:
+  pdf_document: 
+    highlight: zenburn
+  html_document: default
+---
+
+#Packages
+```{r, message=FALSE, warning=FALSE}
+library(vegan)
+library(tidyverse)
+library(phyloseq)
+library(dada2)
+library(ggrepel)
+library(patchwork)
+library(scales)
+library(lubridate)
+library(lomb)
+```
+
+# Output of the script
+
+```{r}
+
+dir.create(file.path('../results/figures/timeseries'), showWarnings = FALSE)
+
+```
+
+#Data import
+
+## Phylo objects 
+```{r}
+bl.phy <- readRDS("../data/robjects/blphyloseq.rds") 
+
+source("sourcefiles/params-graphs.R") 
+source("sourcefiles/main_functions.R")
+source('sourcefiles/timeseries_functions.R')
+
+physeq.list <- data_transformation(bl.phy)
+
+bl.phy.relab <- physeq.list$relab
+bl.phy.raref <- physeq.list$raref
+bl.phy.log <- physeq.list$log
+bl.phy.clr <- physeq.list$clr
+bl.phy.asinh <- transform_sample_counts(bl.phy, function(x) asinh(x))
+
+# since the list is quite big let's erase it
+physeq.list <- NULL
+
+tax <- as(tax_table(bl.phy), 'matrix') %>% 
+  as_tibble(rownames = 'asv') %>% 
+  mutate_if(.predicate = is.factor,.funs = as.character)
+
+envdata <- as.tibble(sample_data(bl.phy)) %>% 
+  mutate(Sample = name.complete)
+
+psmelt.relab <- psmelt_dplyr(bl.phy.relab)
+psmelt.clr <- psmelt_dplyr(bl.phy.clr) %>% mutate_if(is.factor, as.character)
+```
+
+
+## Seasonal ASVs
+```{r}
+lomb02 <- readRDS('../data/robjects/results_ts_lomb02.rds')
+lomb3 <- readRDS('../data/robjects/results_ts_lomb3.rds')
+
+res.lomb02 <- tibble( asv = names(lomb02),
+                      pval = map_dbl(lomb02, ~.x$p.value), 
+                      peak = map_dbl(lomb02, ~.x$peak),
+                      interval  = map(lomb02, ~.x$peak.at) ) %>% 
+  mutate(qval=fdrtool::fdrtool(pval, statistic="pvalue")$qval) %>% 
+  filter(qval <= 0.01, peak >= 10)
+
+res.lomb3 <- tibble( asv = names(lomb3),
+                      pval = map_dbl(lomb3, ~.x$p.value), 
+                      peak = map_dbl(lomb3, ~.x$peak),
+                      interval  = map(lomb3, ~.x$peak.at) ) %>% 
+  mutate(qval=fdrtool::fdrtool(pval, statistic="pvalue")$qval) %>% 
+  filter(qval <= 0.01, peak >= 10)
+
+
+```
+
+# Preprocessing
+
+##Separate the two time series
+
+Now we have to differentiate between the time series with both fractions, since we have to calculate the seasonality signal for each fraction separately. 
+
+```{r}
+
+bl.phy.0.2 <- subset_samples(bl.phy, fraction == '0.2') %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .)
+
+bl.phy.3 <- subset_samples(bl.phy, fraction == '3') %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .)
+
+# The rarefied counterparts
+bl.phy.0.2.raref <- rarefy_even_depth(bl.phy.0.2,rngseed = 42)
+bl.phy.3.raref <- rarefy_even_depth(bl.phy.3,rngseed = 42)
+
+```
+
+
+# Global summary 
+
+```{r}
+
+psmelt.raw <- psmelt_dplyr(bl.phy) 
+
+all <- psmelt.raw %>% 
+  filter( Abundance > 0) %>% 
+  mutate(seasonal = case_when(
+    OTU %in% res.lomb02$asv & fraction == '0.2' ~ 'seasonal',
+    OTU %in% res.lomb3$asv & fraction == '3' ~ 'seasonal',
+    TRUE ~ 'no seasonal'
+  )) %>% 
+  group_by(fraction,curated,seasonal) %>% 
+  dplyr::summarize(Abundance = sum(Abundance),
+                   count = unique(OTU) %>% length()) 
+  
+all.perfect <- all %>%
+  group_by(fraction, curated) %>% 
+  dplyr::mutate(relab.ab = Abundance / sum(Abundance),
+                   relab.count = count / sum(count)) %>% 
+  ungroup() %>% 
+  mutate(fraction = if_else(fraction == "0.2",
+                                   "FL fraction" , "PA fraction")) %>% 
+  italizyce_synes()
+
+ggplot(all.perfect) +
+  geom_bar(aes( x = curated,
+                y = relab.ab, fill = seasonal), stat='identity') +
+  geom_point(data = filter(all.perfect, seasonal == "seasonal"),
+             aes( x = curated, y = relab.count, color = seasonal) ) +
+  geom_text(data = filter(all.perfect, seasonal == "seasonal"),
+            aes(x = curated, y = 1.05, label = count ),
+            size = 2.5, color = economist_pal()(1)) + 
+  geom_hline(yintercept = 0.5, linewidth=.2, linetype="dotted", color = "grey") +
+  coord_flip() +
+  facet_wrap(~fraction) +
+  scale_fill_manual(values = c('#A9D0D0', '#60ABAE'), name = "") + 
+  scale_colour_economist() +
+  theme_minimal() +
+  lil.strip +
+  theme( axis.text.y = ggtext::element_markdown()) + 
+  scale_x_discrete(limits = rev(tax.order.palette)) +
+  scale_y_continuous( labels = percent) + 
+  guides(color = FALSE) +
+  ylab("Relative abundance") +
+  xlab( "Taxonomy" ) 
+
+ggsave("../results/figures/timeseries/summary-seasonality-lomb.pdf",
+       width = 9, height = 7, 
+       useDingbats = FALSE)
+```
+
+
+# Distribution along year 
+
+## Creation of categories 
+
+```{r}
+
+sea.asvs <- unique( c(res.lomb02$asv, res.lomb3$asv))
+
+sea.category <-  data.frame( asv = tax$asv) %>% 
+  mutate( seasonal = case_when( asv %in% sea.asvs ~ 'seasonal',
+                                TRUE ~ 'no seasonal' ), 
+          seasonal.type = case_when(
+            asv %in% intersect(res.lomb02$asv, res.lomb3$asv) ~ 'seasonal both',
+            asv %in% setdiff(res.lomb02$asv, res.lomb3$asv) ~ 'seasonal FL',
+            asv %in% setdiff(res.lomb3$asv, res.lomb02$asv) ~ 'seasonal PA',
+            TRUE ~ 'no seasonal'),
+          seasonal.type = factor(seasonal.type, 
+                                 levels = c('no seasonal', 'seasonal both',
+                                            'seasonal PA', 'seasonal FL'))
+  ) 
+
+
+
+```
+
+## Relab
+If we discriminate between the classes of seasonality for the ASVs, we can observe the distribution. 
+```{r}
+
+psm.raw <- psmelt_dplyr(bl.phy) 
+
+
+psmelt.relab %>% 
+  left_join(sea.category, by = c('OTU' = 'asv')) %>% 
+  group_by(fraction, Sample, month,  seasonal.type) %>% 
+  summarize(relab = sum(Abundance)) %>% 
+  ggplot( aes(month, relab, color = seasonal.type)) + 
+  geom_boxplot(aes(fill = seasonal.type), 
+               position = position_dodge(width = 0.7),
+               alpha = 0.7, outlier.colour = 'transparent') + 
+  geom_point(position= position_dodge(width = 0.7))  + 
+  facet_wrap(~ str_c('Fraction ', fraction), ncol = 1) + 
+  lil.strip + 
+  scale_x_month + 
+  scale_fill_pander() + 
+  scale_color_pander() + 
+  scale_y_continuous(labels = scales::percent, name = 'Relative abundance (%)')
+
+ggsave('../results/figures/timeseries/comm_str_typeseasonality.pdf',
+       width = 9, height = 6)
+
+```
+
+## Ocurrence
+
+```{r}
+psmelt.relab %>% 
+  left_join(sea.category, by = c('OTU' = 'asv')) %>% 
+  filter( Abundance > 0) %>% 
+  group_by(fraction, Sample, month,  seasonal.type) %>% 
+  summarize(count = n()) %>% 
+  ggplot( aes(month, count, color = seasonal.type)) + 
+  geom_boxplot(aes(fill = seasonal.type), 
+               position = position_dodge(width = 0.7),
+               alpha = 0.7, outlier.colour = 'transparent') + 
+  geom_point(position= position_dodge(width = 0.7))  + 
+  facet_wrap(~ str_c('Fraction ', fraction), ncol = 1) + 
+  lil.strip + 
+  scale_x_month + 
+  scale_fill_pander() + 
+  scale_color_pander() + 
+  ylab('Ocurrence (n. ASVs)')
+
+ggsave('../results/figures/timeseries/ocurrence_typeseasonality.pdf',
+       width = 9, height = 6)
+
+```
+  
+
+# Polar plot 
+
+```{r}
+polar_plot <- function(df, yaxis = 'peak', shape = 'fraction', link = 'OTU'){
+  
+  df %>% 
+  ggplot( aes_string("month", yaxis)) + 
+  geom_vline(data =  data.frame( values = seq(0.5, 12.5, by = 1)),
+             aes(xintercept = values), color = 'gray') + 
+  geom_jitter(aes_string(fill = "curated", shape = shape),
+              size = 2.4,
+              width = 0.3)  +
+  coord_polar(theta = 'x', start = 12.3) + 
+  guides( fill = guide_legend( override.aes = list(size = 3, shape = 21)))  + 
+  guides( shape = guide_legend( override.aes = list(size = 3)))  + 
+  lil.strip + 
+  bac.fillScale +
+  scale_x_month + 
+  cowplot::theme_minimal_hgrid() 
+
+}
+```
+
+```{r}
+power.lomb <- bind_rows(
+  list( `0.2` = res.lomb02, 
+        `3` =  res.lomb3),
+  .id = 'fraction')
+
+
+maxima.median <- psmelt.relab %>% 
+  left_join(sea.category, by = c('OTU' = 'asv')) %>% 
+  group_by(fraction,OTU, month) %>% 
+  summarize(median.relab = median(Abundance)) %>% 
+  group_by(fraction,OTU) %>% 
+  filter(median.relab == max(median.relab)) %>% 
+  arrange(OTU)
+
+left_join(maxima.median, power.lomb, 
+          by = c('OTU' = 'asv', 'fraction')) %>% 
+  left_join(sea.category, by = c('OTU' = 'asv')) %>% 
+  select(fraction, OTU, month, peak, seasonal.type) %>% 
+  left_join(tax, by = c('OTU' = 'asv')) %>% 
+  italizyce_synes() %>% 
+  polar_plot(shape = "seasonal.type") + 
+  ylab('Strength recurrence') + 
+  facet_wrap(~fraction, ncol = 2)  + 
+  italics.strip.legend + 
+  scale_shape_manual(values = 21:25)  
+  
+ggsave('../results/figures/timeseries/polar_plot_general.pdf',
+       width = 9, height = 9)
+
+
+data.frame( values = seq(0.5, 12.5, by = 1))
+
+polardatafinal <- left_join(maxima.median, power.lomb, 
+          by = c('OTU' = 'asv', 'fraction')) %>% 
+  left_join(sea.category, by = c('OTU' = 'asv')) %>% 
+  select(fraction, OTU, month, peak, seasonal.type) %>% 
+  left_join(tax, by = c('OTU' = 'asv')) %>% 
+  filter(seasonal.type != 'no seasonal') %>% 
+  mutate(fraction = ifelse( fraction ==  '0.2', 'FL time series', 'PA time series')) %>%
+  filter(!is.na(peak)) %>% 
+  italizyce_synes()
+
+polardatafinal %>% 
+  polar_plot(shape = "seasonal.type") + 
+  facet_wrap(~fraction + seasonal.type , ncol = 2)  + 
+  ylab('Strength recurrence') + 
+  scale_y_continuous( limits = c(0,30)) + 
+  scale_shape_manual(values = 21:25, name = "Seasonality") + 
+  italics.strip.legend 
+
+
+ggsave('../results/figures/timeseries/polar_plot_3types.pdf',
+       width = 11, height = 9)
+```
+
+

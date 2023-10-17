@@ -1,0 +1,444 @@
+---
+title: "Alpha,Beta analysis"
+author: "Adrià Auladell Martín"
+output:
+  pdf_document: 
+    highlight: zenburn
+  html_document: default
+---
+
+```{r echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+#Packages
+```{r message=FALSE, warning=FALSE}
+
+set.seed(42) 
+
+library(vegan)
+library(tidyverse)
+library(phyloseq)
+library(ggrepel)
+```
+
+# Output of the script
+
+```{r}
+
+
+dir.create(file.path('../results/figures/betadiv'), showWarnings = FALSE)
+
+```
+
+#Data import
+
+```{r}
+bl.phy <- readRDS("../data/robjects/blphyloseq.rds") 
+source("sourcefiles/params-graphs.R") 
+source("sourcefiles/main_functions.R")
+
+physeq.list <- data_transformation(bl.phy)
+
+bl.phy.relab <- physeq.list$relab
+bl.phy.rar <- physeq.list$raref
+bl.phy.log <- physeq.list$log
+bl.phy.clr <- physeq.list$clr
+
+# since the list is quite big let's erase it
+physeq.list <- NULL
+```
+
+## Separation of fractions 
+
+```{r}
+bl.phy.rar.02 <- subset_samples(bl.phy.rar,
+                                                fraction == '0.2') %>% 
+  prune_taxa(taxa = taxa_sums(.) > 0, x = .)
+
+bl.phy.rar.3 <- subset_samples(bl.phy.rar,
+                                                fraction == '3') %>% 
+  prune_taxa(taxa = taxa_sums(.) > 0, x = .)
+
+
+bl.phy.clr.02 <- subset_samples(bl.phy.clr,
+                                fraction == '0.2') %>% 
+  prune_taxa(taxa = taxa_sums(.) > 0, x = .)
+
+bl.phy.clr.3 <- subset_samples(bl.phy.clr,
+                               fraction == '3') %>% 
+  prune_taxa(taxa = taxa_sums(.) > 0, x = .)
+
+```
+
+# Abundant and low 
+
+```{r}
+preval02 <- readRDS('../data/robjects/asv_preval_02.rds') 
+preval3 <- readRDS('../data/robjects/asv_preval_3.rds') 
+
+abund02 <- preval02 %>% filter(presence == 'abundant') %>% pull(asv)
+abund3 <- preval3 %>% filter(presence == 'abundant') %>% pull(asv)
+```
+
+
+#Beta diversity estimation
+
+Let's create the directory in which all results will be saved. 
+```{r}
+
+dir.create(file.path('../results/figures/betadiv'), showWarnings = FALSE)
+
+```
+
+
+##All 
+### NMDS
+
+```{r}
+
+ordi.nmds.rare <- ordinate(bl.phy.rar, 'NMDS', 'bray')
+
+
+nmds <- plot_ordination(bl.phy.rar,
+                        ordi.nmds.rare, 
+                        type='sample', justDF = TRUE) 
+
+all <-  ggplot(nmds,aes(NMDS1,NMDS2)) +
+  ggConvexHull::geom_convexhull(aes(group = fraction), alpha = 0.1) + 
+  geom_point(aes(fill=season,shape=fraction), size = 3) +
+  sea.fillScale + 
+  coord_equal() +
+  scale_y_continuous(n.breaks = 5) + 
+  scale_shape_manual(values = c(21,24)) + 
+  guides( fill = guide_legend(override.aes = list(shape = 21)))
+
+ggsave("../results/figures/betadiv/general_allfrac_sams.pdf",
+       all, 
+       width =7,
+       height = 5)
+
+ 
+```
+
+#### Only abundant
+```{r}
+bl.phy.rar.ab <- subset_taxa(bl.phy.rar,
+                                (taxa_names(bl.phy.rar) %in% c(abund02,abund3)))
+
+ordi.nmds.rare <- ordinate(bl.phy.rar.ab, 'NMDS', 'bray')
+
+
+nmds <- plot_ordination(bl.phy.rar.ab,
+                        ordi.nmds.rare, 
+                        type='sample', justDF = TRUE) 
+
+abonly <- ggplot(nmds,aes(NMDS1,NMDS2)) +
+  ggConvexHull::geom_convexhull(aes(group = fraction), alpha = 0.1) + 
+  # geom_line(aes(group = samname)) + 
+  geom_point(aes(fill=season,shape=fraction), size = 3) +
+  sea.fillScale + 
+  coord_equal() +
+  scale_y_continuous(n.breaks = 5) + 
+  scale_shape_manual(values = c(21,24)) + 
+  guides( fill = guide_legend(override.aes = list(shape = 21)))
+
+ggsave("../results/figures/betadiv/general_allfrac_onlyab.pdf",
+       abonly,
+       width = 5, height =5)
+
+samdat <-  data.frame(sample_data(bl.phy.rar.ab))
+
+dist.ab <-  phyloseq::distance(bl.phy.rar.ab, method="bray")
+
+season.adonis = adonis( dist.ab ~ season + fraction,
+                        samdat)
+
+
+
+```
+
+#### Rare taxa only 
+
+```{r}
+
+bl.phy.rar.lowab <- subset_taxa(bl.phy.rar,
+                                !(taxa_names(bl.phy.rar) %in% c(abund02,abund3)))
+
+ordi.nmds.rare <- ordinate(bl.phy.rar.lowab, 'NMDS', 'bray')
+
+
+nmds <- plot_ordination(bl.phy.rar.lowab,
+                        ordi.nmds.rare, 
+                        type='sample', justDF = TRUE) 
+
+rarionly <- ggplot(nmds,aes(NMDS1,NMDS2)) +
+  ggConvexHull::geom_convexhull(aes(group = fraction), alpha = 0.1) + 
+  # geom_line(aes(group = samname), alpha = 0.4) +
+  geom_point(aes(fill=season,shape=fraction), size = 3) +
+  sea.fillScale + 
+  coord_equal() +
+  scale_y_continuous(n.breaks = 5) + 
+  scale_shape_manual(values = c(21,24)) + 
+  guides( fill = guide_legend(override.aes = list(shape = 21)))
+
+ggsave("../results/figures/betadiv/general_allfrac_onlylowab.pdf",
+       rarionly, 
+       width = 5, height =5)
+
+samdat <-  data.frame(sample_data(bl.phy.rar.lowab))
+
+dist.rar <-  phyloseq::distance(bl.phy.rar.lowab, method="bray")
+season.adonis = adonis( dist.rar ~ season + fraction,
+                        samdat)
+
+season.adonis
+```
+
+#### Composite 
+
+```{r}
+library(patchwork)
+
+all_noguid <- all + guides(shape = FALSE,color = FALSE, fill = FALSE) 
+
+
+composite <- (all_noguid | ((abonly + rarionly) / guide_area()) + 
+  plot_layout(guides = 'collect',
+              heights  = c(0.8, 0.2)) & leg.bottom) + 
+  plot_annotation(tag_levels = 'A')
+
+compov2 <- all + abonly + rarionly + 
+  plot_annotation(tag_levels = 'A') + 
+  plot_layout(guides = 'collect') &
+  leg.bottom 
+
+ggsave('../results/figures/betadiv/general_composite.pdf',
+       plot = composite, 
+       width = 12, height = 6)
+
+ggsave('../results/figures/betadiv/general_compositev2.pdf',
+       plot = compov2, 
+       width = 12, height = 6)
+
+```
+
+
+
+#### Distances 
+
+```{r}
+  
+put_distances_df <- function(physeq){
+  
+  data.frame(as.matrix(distance(physeq, method='bray'))) %>% 
+  rownames_to_column(var = 'name.complete') %>% 
+  gather(key = 'name.pair', value = 'bray', -name.complete)
+}
+
+comparison.distances <- c(bl.phy.rar.ab, bl.phy.rar.lowab) %>% 
+  map(~put_distances_df(.x)) %>% 
+  bind_rows( .id = 'presence') %>% 
+  left_join(data.frame( sample_data(bl.phy)), by = 'name.complete') %>% 
+  left_join(data.frame( sample_data(bl.phy)), by = c('name.pair' = 'name.complete')) %>% 
+  filter(samname.x == samname.y) %>% 
+  filter(name.complete != name.pair) %>% 
+  mutate(presence = ifelse( presence == '1', 'abundant ASVs', 'rare ASVs'))
+  
+
+
+comparison.distances %>% 
+  ggplot( aes(presence, 1 - bray)) + 
+  geom_jitter(width = 0.1, aes(color = season.x)) + 
+  geom_violin(width = 0.1, draw_quantiles = c(0.25,0.5,0.75), alpha = 0.9) + 
+  sea.colScale + 
+  ylab(' Bray curtis similarity') + 
+  xlab(' Type of ASVs considered') 
+
+ggsave('../results/figures/betadiv/distances_acrosssamedate.pdf',
+       width = 6, height = 4)
+```
+
+
+## dbRDA
+### Abstraction
+
+### Adonis for selecting best variables 
+
+```{r}
+find_best_variables <- function(physeq, env, pval = 0.01){
+  otu.adonis <- as(otu_table(physeq), "matrix") %>%
+    data.frame() %>% 
+    .[rownames(.) %in% rownames(env),] 
+  print(dim(otu.adonis))
+  print(dim(env))
+    
+  ad <- adonis(otu.adonis ~ ., data = env, permutations = 999, na.rm = T)
+  print(ad)
+  
+  bestEnvVariables <- ad$aov.tab %>% 
+    rownames() %>% 
+    .[ad$aov.tab$"Pr(>F)" <= pval] %>% 
+    .[!is.na(.)] 
+  
+  return(bestEnvVariables)
+}
+
+
+```
+
+### Env dataset scaled
+
+```{r}
+
+env.df <- data.frame(sample_data(bl.phy)) %>% 
+  rownames_to_column(var = "sam") %>% 
+  select(sam,one_of("Temperature","Secchi", "Salinity", "Day_length",
+                    "Chla_total", "PO4", "NH4", "NO2", "NO3", "Si", 
+                    "PNF2_5um_Micro", "PNF_5um_Micro", "Cryptomonas",
+                    "HNF_Micro", "HNA", "Prochlorococcus_FC", "Synechococcus")) %>% 
+  na.omit() %>% 
+  magrittr::set_rownames(.$sam)  %>% 
+  select(-sam) %>% 
+  scale() %>% 
+  data.frame()
+  
+
+```
+
+We will add too the pigment distribution values 
+
+```{r}
+odv_pigdata <- readxl::read_excel('../data/metadata-raw/Chemtax_final_ODV.xlsx')
+
+odv.simplified <- odv_pigdata %>% 
+  select(-c(1:7)) %>% 
+  filter(Year %in% seq(2004,2009)) %>% 
+  rename("year" = Year) %>% 
+  mutate(month = str_pad(Month, width = 2, pad = '0')) %>% 
+  # some dates are present more than once! 
+  filter(! Data %in% c('23/03/2004', '24/03/2004',
+                       '20/10/2004', '30/06/2009'))
+  
+  
+  
+
+scale_this <- function(x) as.vector(scale(x))
+
+crossref <- get_variable(bl.phy, c('month', 'year')) %>% 
+  rownames_to_column(var = 'sample') %>% 
+  filter(sample %in% rownames(env.df)) %>% 
+  left_join(odv.simplified, by = c('month', 'year')) %>% 
+  mutate_if(is.double,scale_this) %>% 
+  select(-month, -year, -Data, -Name, -Month, -Day)
+
+
+
+env.df.pigments <- env.df %>% 
+  rownames_to_column(var = 'sample') %>% 
+  left_join(crossref, by = 'sample') %>% 
+  filter(!is.na(PRAS)) %>% 
+  column_to_rownames(var = 'sample') 
+
+```
+
+
+```{r}
+GGally::ggcorr(env.df, label = T )
+```
+
+
+### Fraction 0.2 
+
+```{r}
+
+
+bestEnvVariables.fraction0.2 <- bl.phy.rar.02 %>% 
+  find_best_variables(., env.df[sample_names(bl.phy.rar.02),])
+
+
+dataset.fl <- distance_and_ordination(bl.phy.rar.02,
+                                   bestEnvVariables.fraction0.2)
+
+
+cleaning.vecdata <- dataset.fl$vectordata %>% 
+  mutate( rowname = case_when(
+    rowname == 'Day_length' ~ 'Day~length', 
+    rowname == 'Chla_total' ~ 'Chl~italic(a)', 
+    rowname == 'PNF_5um_Micro' ~ 'PNF~(5~mu*m)', 
+    TRUE ~ rowname))
+
+plot2 <- plot_dbrda(bl.phy.rar.02,
+                   dataset.fl$ordination,
+                   vector.data = cleaning.vecdata,
+                   color = 'season') + 
+  sea.colScale +
+  leg.bottom + 
+  scale_x_continuous(lim = c(-1.2, 1.5)) +
+  scale_y_continuous(lim = c(-2, 1.4)) 
+
+plot2 
+
+ggsave(plot = plot2, '../results/figures/betadiv/dbrda_fraction2.pdf',
+       height = 5, width = 5)
+
+dataset$ordination
+anova.cca(dataset$ordination, by="terms")
+summary(eigenvals(dataset$ordination))[3,1:5]
+
+find_best_variables(bl.phy.rar.02, env.df[sample_names(bl.phy.rar.02),] %>% 
+                      select(bestEnvVariables.fraction0.2))
+
+```
+
+
+### Fraction 3 
+
+```{r}
+
+bestEnvVariables.fraction3 <- bl.phy.rar.3 %>% 
+  find_best_variables(., env.df[sample_names(.),])
+
+dataset <- distance_and_ordination(bl.phy.rar.3,
+                                   bestEnvVariables.fraction3)
+
+
+cleaning.vecdata <- dataset$vectordata %>% 
+  mutate( rowname = case_when(
+    rowname == 'Day_length' ~ 'Day~length', 
+    rowname == 'Chla_total' ~ 'Chl~italic(a)', 
+    rowname == 'PNF_5um_Micro' ~ 'PNF~(5~mu*m)', 
+    rowname == 'PNF2_5um_Micro' ~ 'PNF~(2-5~mu*m)', 
+    TRUE ~ rowname))
+
+
+plot3 <- plot_dbrda(bl.phy.rar.3,
+                   dataset$ordination,
+                   vector.data = cleaning.vecdata,
+                   color = 'season') + 
+  sea.colScale + 
+  leg.bottom + 
+  scale_x_continuous(lim = c(-1.2, 1.5)) +
+  scale_y_continuous(lim = c(-2, 1.4)) 
+
+plot3
+
+ggsave(plot = plot3, '../results/figures/betadiv/dbrda_fraction3.pdf',
+       height = 5, width = 5)
+
+```
+
+## dbRDA composite 
+
+```{r}
+library(patchwork)
+composite <- plot2 + plot3 + 
+  plot_annotation(tag_levels = 'A') + 
+  plot_layout(guides = 'collect') & 
+  leg.bottom
+
+ggsave(plot = composite, filename = '../results/figures/betadiv/dbrda_all.pdf',
+       height =7, width = 10)
+
+```
+

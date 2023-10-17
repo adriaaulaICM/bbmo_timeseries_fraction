@@ -1,0 +1,260 @@
+---
+title: "Alpha,Beta analysis"
+author: "Adrià Auladell Martín"
+output:
+  pdf_document: 
+    highlight: zenburn
+  html_document: default
+---
+
+```{r echo=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning = FALSE,message = FALSE)
+```
+
+#Packages
+```{r, message=FALSE, warning=FALSE}
+library(vegan)
+library(tidyverse)
+library(phyloseq)
+library(ggrepel)
+library(scales)
+
+# For english plotting it is useful to change the locale
+Sys.setlocale("LC_TIME", "en_US.UTF-8")
+```
+
+# Output of the script
+
+```{r}
+
+dir.create(file.path('../results/figures/abundance'), showWarnings = FALSE)
+
+```
+
+#Data import
+
+```{r}
+bl.phy <- readRDS("../data/robjects/blphyloseq.rds") 
+source("sourcefiles/params-graphs.R") 
+source("sourcefiles/main_functions.R")
+
+un.sam <- readRDS('../data/robjects/unusual_samples.rds')
+
+physeq.list <- data_transformation(bl.phy)
+
+bl.phy.relab <- physeq.list$relab
+bl.phy.raref <- physeq.list$raref
+bl.phy.log <- physeq.list$log
+bl.phy.clr <- physeq.list$clr
+
+# since the list is quite big let's erase it
+physeq.list <- NULL
+```
+
+## Separation of fractions 
+
+```{r}
+bl.phy.0.2 <- subset_samples(bl.phy, fraction == '0.2') %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .)
+
+bl.phy.0.2.relab <- transform_sample_counts(bl.phy.0.2, function(x) x / sum(x))
+
+bl.phy.3 <- subset_samples(bl.phy, fraction == '3') %>% 
+  prune_taxa(taxa = taxa_sums(.) != 0, .)
+
+bl.phy.3.relab <- transform_sample_counts(bl.phy.3, function(x) x / sum(x))
+```
+
+## Psmelt creation 
+
+```{r}
+psmelt.relab <- psmelt_dplyr(bl.phy.relab)
+psmelt.raref <- psmelt_dplyr(bl.phy.raref)
+psmelt.clr <- psmelt_dplyr(bl.phy.clr)
+
+otu <- as(t(otu_table(bl.phy.raref)), 'matrix') %>% 
+  data.frame()  %>% 
+  rownames_to_column(var = 'asv')
+
+tax <- as(tax_table(bl.phy), 'matrix')  %>% 
+  data.frame() %>% 
+  rownames_to_column(var = 'asv')
+```
+
+# Abundance distribution
+
+## Area plot
+
+```{r}
+
+
+psmelt.relab %>% 
+  group_by(Date, fraction, curated) %>% 
+  summarize(Abundance = sum(Abundance)) %>% 
+  mutate( fraction = ifelse(fraction == '0.2',
+                            'FL fraction',
+                            'PA fraction')) %>% 
+  italizyce_synes() %>% 
+  ggplot() +
+  geom_area(aes(Date, Abundance, fill = curated)) +
+  facet_wrap(~fraction, ncol = 1) +
+  scale_y_continuous(labels = function(x) percent(x, accuracy = 1),
+                     name = "Relative abundance", expand = c(0,0))  +
+  scale_x_date( date_breaks  = "6 month",
+                date_minor_breaks = "1 month",
+                labels = scales::date_format("%b-%Y"), expand = c(0,0)) +
+  lil.strip +
+  theme_minimal(base_size = 13) +
+  leg.bottom +
+  xlab("Year") +
+  lab.flip + 
+  theme(legend.text = ggtext::element_markdown(size = 10),
+        legend.key.size = unit(4, units = "mm")) +
+  guides(fill = guide_legend(ncol = 5, title = NULL)) + 
+  bac.fillScale
+
+ggsave('../results/figures/abundance/areaplot_bothfrac.pdf',
+       width = 10, height = 6)
+```
+
+    
+### Heatmap years merged
+
+```{r}
+
+fracdata <- c('0.2', '3') %>% 
+  set_names( map(c('0.2', '3'), 
+                 ~ psmelt.relab %>% 
+                   filter(!Sample %in% un.sam) %>% 
+                   filter(fraction == .x) %>% 
+                   mutate(month = format(Date, '%b') %>%
+                            factor(., levels = str_to_title(month.order))) %>% 
+                   group_by(year,month, curated) %>% 
+                   summarize(Abundance = sum(Abundance))  %>% 
+                   group_by(month,curated) %>% 
+                   summarize( Abundance = mean(Abundance))),
+             .) %>% 
+  bind_rows(.id = 'fraction')
+
+percent_exact <- function(.){
+  scales::percent(., accuracy = 1)
+}
+
+fracdata %>% 
+  mutate(fraction = ifelse( fraction ==  '0.2', 'FL fraction', 'PA fraction')) %>%
+  italizyce_synes() %>% 
+  ggplot( aes(month, factor(curated, levels = rev(tax.order.palette)))) + 
+  geom_tile(aes(fill = Abundance)) + 
+  geom_text(aes(label = scales::number(Abundance * 100,
+                                       accuracy = .1)),
+            color = 'white',
+            size = 4) + 
+  scale_fill_viridis_c(labels = percent_exact, name = 'Relative abundance') + 
+  facet_wrap(~fraction) + 
+  lil.strip + 
+  ylab('Taxonomy') + 
+  xlab('Month') + 
+  theme_minimal(base_size = 13) + 
+  theme(axis.text.y =  ggtext::element_markdown()) + 
+  leg.bottom 
+
+ggsave('../results/figures/abundance/heatmap_allmerged.pdf',
+       width = 13, 
+       height = 9)
+
+```
+# Correlation between fractions
+
+## Distribution across groups 
+```{r}
+
+psmelt_dplyr(bl.phy.clr) %>% 
+  select(OTU, Abundance, samname, fraction) %>% 
+  spread(fraction, Abundance)
+
+
+correlation.comparison <- psmelt_dplyr(bl.phy.clr) %>% 
+  select(OTU, Abundance, samname, fraction) %>% 
+  spread(fraction, Abundance)  %>% 
+  group_by(OTU) %>% 
+  summarize( correlation = cor(`0.2`, `3`,
+                               method = 'spearman',
+                               use ='pairwise.complete.obs'),
+             sdev02 = sd(`0.2`),
+             sdev3 = sd(`3`,na.rm = TRUE),
+             pvalue = cor.test(`0.2`, `3`,
+                               method = 'spearman',
+                               na.action = 'na.rm')$p.value ) %>% 
+  left_join(tax, by = c('OTU'='asv')) %>% 
+  # filter(pvalue <= 0.01, correlation >= 0.5) %>% 
+  mutate(correlation = round(correlation, digits = 2))
+  
+
+ab02 <- abunprev.02 %>% 
+  filter(presence == 'abundant', behavior %in% c('Broad')) %>% 
+  pull(asv)
+
+
+ab3 <- abunprev.3 %>% 
+  filter(presence == 'abundant', behavior %in% c('Broad')) %>% 
+  pull(asv)
+
+correlation.comparison %>% 
+  filter(OTU %in% intersect(ab02, ab3)) %>%
+  arrange(-correlation) %>% 
+  select(OTU, correlation, pvalue, curated) %>% 
+  ggplot( aes( correlation, fill = pvalue < 0.01)) + 
+  geom_histogram(show.legend = F) + 
+  lil.strip  + 
+  bac.colScale
+
+plot.abcorrs <- function(physeq, asvs){
+  psmelt_dplyr(physeq) %>% 
+    filter(OTU %in% asvs) %>% 
+    left_join(correlation.comparison %>% select(OTU, pvalue, correlation),
+              by = 'OTU') %>% 
+    mutate( OTU = factor(OTU, levels = unique(asvs))) %>% 
+    select(OTU,curated, pvalue, Abundance, samname, fraction, correlation) %>% 
+    spread(fraction, Abundance)  %>%  
+    mutate(OTU = str_c(OTU, ', R = ', correlation, ', p= ', round(pvalue, digits = 2))) %>% 
+    italizyce_synes() %>% 
+    ggplot( aes( x = `0.2`, y = `3`)) + 
+    geom_abline(slope = 1, intercept = 0, linetype = 2 ) + 
+    geom_point(aes(fill = curated),shape = 21, show.legend = T, alpha = 0.8) + 
+    # geom_smooth(method = 'lm', se = FALSE, size = 0.7, alpha = 0.8) + 
+    facet_wrap(~OTU,
+              ncol = 5,
+              scales = 'free') +
+    theme_bw(base_size = 12) + 
+    theme(strip.background = element_blank(),
+          strip.text.x =element_text(margin = margin(.05, 0, .1, 0, "cm"))) + 
+    scale_y_continuous( label = function(x) scales::percent(x, accuracy = 1)) + 
+    scale_x_continuous( label = function(x) scales::percent(x, accuracy = 1)) + 
+    bac.fillScale + 
+    leg.bottom + 
+    italics.strip.legend + 
+    labelsx.diag + 
+    guides(fill = guide_legend(override.aes = list(size = 3),
+                               nrow= 6,
+                               title.position = 'top')) + 
+    xlab( 'Relative abundance in FL fraction') + 
+    ylab( 'Relative abundance in PA fraction')
+} 
+
+corrs.clr <- plot.abcorrs(bl.phy.clr, intersect(ab02,ab3)) + 
+  scale_y_continuous(label = scales::number) +
+  scale_x_continuous(label = scales::number) +
+    xlab( 'CLR-transformed abundance, FL fraction') + 
+    ylab( 'CLR-transformed abundance, PA fraction')
+  
+corrs.relab <- plot.abcorrs(bl.phy.relab, intersect(ab02,ab3))
+
+ggsave(plot = corrs.clr, 
+       '../results/figures/abundance/corr_sharedclr.pdf',
+       height = 10, width = 10)
+
+ggsave(plot = corrs.relab, 
+       '../results/figures/abundance/corr_shared.pdf',
+       height = 10, width = 10)
+```
+
