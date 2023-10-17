@@ -16,6 +16,7 @@ Inside the `data/cleaned` folder there is a phyloseq R object with the sequence 
 To execute most of the analysis, create an R project in the main folder and execute the desired scripts. Most of the `figures` scripts 
 require to have executed scripts in the `analysis` folder for the statistics to be saved in the correspondent folders. 
 
+dfalkjd
 You will need some minimal packages for running the scripts. For most analysis: 
 
 - [tidyverse](https://www.tidyverse.org/): data wrangling, visualization and general purpose package.
