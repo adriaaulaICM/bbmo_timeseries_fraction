@@ -81,12 +81,75 @@ tax <- as(tax_table(bl.phy), 'matrix')  %>%
   rownames_to_column(var = 'asv')
 ```
 
+# Abund./Prevalence
+
+```{r}
+
+calculate_abund_prevalen.df <- function(physeq){
+  
+  abundance.prevalence.df <-   as(otu_table(physeq), 'matrix') %>%
+    data.frame() %>%
+    gather(key = 'asv', value = 'Abundance') %>%
+    group_by(asv) %>%
+    #filter((Abundance) > 100) %>%
+    summarize( ocurrence = sum(Abundance > 0),
+               ocurrence_more1 = sum(Abundance > 0.01),
+               mean.reads = mean(Abundance)) %>%
+    mutate(prevalence = ocurrence / nsamples(physeq),
+           presence = ifelse( ocurrence_more1 > 0, 'abundant',
+                                  'low abundant'),
+           behavior = case_when(prevalence >= 0.75 ~ 'Broad',
+                                prevalence <= 0.10 ~ 'Narrow',
+                                TRUE ~ 'Other'))
+  
+  print(abundance.prevalence.df %>%
+    ggplot(aes(prevalence, mean.reads)) +
+    geom_point(aes(color = behavior), alpha = 0.7))
+  
+  return(abundance.prevalence.df)
+}
+
+
+abunprev.02 <- calculate_abund_prevalen.df(bl.phy.0.2.relab)
+abunprev.3 <- calculate_abund_prevalen.df(bl.phy.3.relab)
+
+```
+
 # Abundance distribution
 
 ## Area plot
 
+## Summary taxonomies to decide whats what
 ```{r}
 
+# psmelt.relab %>% 
+#   mutate( fraction = ifelse(fraction == '0.2',
+#                             'FL fraction',
+#                             'PA fraction')) %>% 
+#   group_by(fraction, Sample, Class, Order, Family) %>% 
+#   summarize(Abundance = sum(Abundance)) %>% 
+#   group_by(fraction, Class, Order, Family) %>% 
+#   summarize(Abundance = median(Abundance)) %>% 
+#   
+#   ungroup() %>% 
+#   arrange(-Abundance) %>% 
+#   View(title = 'famab')
+# 
+# 
+# psmelt.relab %>% 
+#   filter(Order == 'Sphingomonadales') %>% 
+#   View()
+# 
+# 
+# View(psmelt.relab)
+# psmelt.relab %>% 
+#   filter(Family == 'Alteromonadaceae') %>% 
+#   View()
+
+```
+
+
+```{r}
 
 psmelt.relab %>% 
   group_by(Date, fraction, curated) %>% 
@@ -143,6 +206,7 @@ percent_exact <- function(.){
 fracdata %>% 
   mutate(fraction = ifelse( fraction ==  '0.2', 'FL fraction', 'PA fraction')) %>%
   italizyce_synes() %>% 
+  filter(!is.na(curated)) %>% 
   ggplot( aes(month, factor(curated, levels = rev(tax.order.palette)))) + 
   geom_tile(aes(fill = Abundance)) + 
   geom_text(aes(label = scales::number(Abundance * 100,
@@ -256,5 +320,27 @@ ggsave(plot = corrs.clr,
 ggsave(plot = corrs.relab, 
        '../results/figures/abundance/corr_shared.pdf',
        height = 10, width = 10)
+```
+
+# Summary table 
+
+```{r}
+
+dir.create('../results/tables')
+
+psmelt_dplyr(bl.phy.raref) %>% 
+  filter(!is.na(curated)) %>% 
+  group_by(Sample, fraction, curated) %>% 
+  summarize( total = sum(Abundance)) %>% 
+  mutate( relab = (total / sum(total)) * 100,
+          curated = factor(curated, levels = tax.order)) %>% 
+  group_by(fraction, curated) %>% 
+  summarize( min = min(relab), 
+             median = median(relab),
+             max = max(relab),
+             sd = sd(relab)) %>% 
+  mutate_if(is.double, round, digits = 2)  %>% 
+  write_tsv('../results/tables/minmedmaxsd_values.tsv')
+
 ```
 

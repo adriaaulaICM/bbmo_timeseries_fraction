@@ -18,7 +18,8 @@ library(ggrepel)
 library(patchwork)
 library(scales)
 library(lubridate)
-library(lomb)
+library(fdrtool)
+#library(lomb)
 ```
 
 # Output of the script
@@ -67,18 +68,23 @@ psmelt.clr <- psmelt_dplyr(bl.phy.clr) %>% mutate_if(is.factor, as.character)
 lomb02 <- readRDS('../data/robjects/results_ts_lomb02.rds')
 lomb3 <- readRDS('../data/robjects/results_ts_lomb3.rds')
 
+par(mar=c(1,1,1,1))
+
 res.lomb02 <- tibble( asv = names(lomb02),
                       pval = map_dbl(lomb02, ~.x$p.value), 
                       peak = map_dbl(lomb02, ~.x$peak),
                       interval  = map(lomb02, ~.x$peak.at) ) %>% 
-  mutate(qval=fdrtool::fdrtool(pval, statistic="pvalue")$qval) %>% 
+  mutate(qval=fdrtool(pval, statistic="pvalue", plot = F)$qval) %>% 
   filter(qval <= 0.01, peak >= 10)
+
+par(mar=c(1,1,1,1))
+
 
 res.lomb3 <- tibble( asv = names(lomb3),
                       pval = map_dbl(lomb3, ~.x$p.value), 
                       peak = map_dbl(lomb3, ~.x$peak),
                       interval  = map(lomb3, ~.x$peak.at) ) %>% 
-  mutate(qval=fdrtool::fdrtool(pval, statistic="pvalue")$qval) %>% 
+  mutate(qval=fdrtool(pval, statistic="pvalue")$qval) %>% 
   filter(qval <= 0.01, peak >= 10)
 
 

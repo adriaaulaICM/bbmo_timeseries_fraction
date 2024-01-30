@@ -42,7 +42,6 @@ set.seed(42)
 superpalette <- 	c("#FDAE61FF", #B_Flavobacteriia
                    "#FEE090FF",  #Other_Bacteroidetes
                    "#65A479FF", #Cya_Synechococcus
-                   "#9CCB86FF", #Other_Cyanobacteria
                    "#92C5DEFF", #P_Alp_Rhodobacterales
                    "#ABD9E9FF", #P_Alp_Rickettsiales
                    "#4393C3FF", #P_Alp_SAR11_clade
@@ -52,54 +51,51 @@ superpalette <- 	c("#FDAE61FF", #B_Flavobacteriia
                    "#CA699DFF",  #P_Gam_Cellvibrionales
                    "#762A83FF", #P_Gam_Oceanospirilalles
                    "#C2A5CFFF", #Gam_Proteobacteria
-                   "#330033", #Other Proteobacteria
+                   # "#330033", #Other Proteobacteria
                    "#D6604DFF", #Actinobacteria
                    "#B2182BFF", #O_Firmicutes
                    "#BABABAFF", #O_Planctomycetes
                    "#5C6068FF", #O_Verrucomicrobia
                    "#000000FF") #Other Bacteria
 
-
-tax.order <-c("Flavobacteriia",
-              "Other Bacteroidetes",
-              "Synechococcus",
-              "Other Cyanobacteria",
+tax.order <-c("Flavobacteriales",
+              "Other Bacteroidota",
+              "Cyanobiaceae",
               "Alp-Rhodobacterales",
               "Alp-Rickettsiales",
               "Alp-SAR11 clade",
               "Alp-Sphingomonadales",
               "Other Alphaproteobacteria",
-              "Gam-Alteromonadales",
+              "Gam-Alteromonadaceae",
               "Gam-Cellvibrionales",
               "Gam-Oceanospirillales",
               # "P_Gam_Pseudomonadales",
               "Other Gammaproteobacteria",
-              "Other Proteobacteria",
-              "Actinobacteria",
+              # "Other Proteobacteria",
+              "Actinobacteriota",
               "Firmicutes",
-              "Planctomycetes",
-              "Verrucomicrobia",
+              "Planctomycetota",
+              "Verrucomicrobiota",
               "Other Bacteria")
 
-tax.order.palette <-c("Flavobacteriia",
-              "Other Bacteroidetes",
-              "*Synechococcus*",
-              "Other Cyanobacteria",
+tax.order.palette <-c("Flavobacteriales",
+              "Other Bacteroidota",
+              "Cyanobiaceae",
               "Alp-Rhodobacterales",
               "Alp-Rickettsiales",
               "Alp-SAR11 clade",
               "Alp-Sphingomonadales",
               "Other Alphaproteobacteria",
-              "Gam-Alteromonadales",
+              "Gam-Alteromonadaceae",
               "Gam-Cellvibrionales",
               "Gam-Oceanospirillales",
               # "P_Gam_Pseudomonadales",
               "Other Gammaproteobacteria",
-              "Other Proteobacteria",
-              "Actinobacteria",
+              # "Other Proteobacteria",
+              "Actinobacteriota",
               "Firmicutes",
-              "Planctomycetes",
-              "Verrucomicrobia",
+              "Planctomycetota",
+              "Verrucomicrobiota",
               "Other Bacteria")
 
 names(superpalette) <- tax.order.palette

@@ -59,7 +59,7 @@ colnames(asv.tab) <- str_c("asv", seq(1,ncol(asv.tab)))
 
 ```{r}
 
-tax.raw <- readRDS("../data/abund-tax-raw/tax_assignation.rds") %>% 
+tax.raw <- readRDS("../data/abund-tax-raw/devotes_idtaxa_tax_assignation.rds") %>% 
   data.frame() %>% 
   rownames_to_column(var = "seq") %>% 
   mutate(asv = str_c("asv", seq(1,nrow(.)))) %>% 
@@ -67,11 +67,12 @@ tax.raw <- readRDS("../data/abund-tax-raw/tax_assignation.rds") %>%
 
 # We erase all the incorrect taxonomy
 tax.raw <- tax.raw %>%
-  filter(Kingdom != "Eukaryota") %>% 
-  filter(Kingdom != "Archaea") %>% 
-  filter(!(str_detect(Class,pattern = "Chloroplast"))) %>% 
-  filter(!(str_detect(Family,pattern = "Mitochondria")))
+  filter(domain != "Eukaryota") %>% 
+  filter(domain != "Archaea") %>% 
+  filter(!(str_detect(class,pattern = "Chloroplast"))) %>% 
+  filter(!(str_detect(family,pattern = "Mitochondria")))
 
+colnames(tax.raw) <- c('Domain', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species', 'asv', 'seq')
 ```
 
 ##Introduce curated classification
@@ -83,59 +84,58 @@ tax.raw$curated <- tax.raw[,"Phylum"]
 
 tax.raw <- tax.raw %>% 
   mutate_if(is.factor, as.character) %>% 
-  mutate(curated = ifelse(Phylum %in% c("Actinobacteria", 
-                                        "Bacteroidetes", "Firmicutes",
+  mutate(curated = ifelse(Phylum %in% c("Actinobacteriota", 
+                                        "Bacteroidota", "Firmicutes",
                                         "Cyanobacteria",  "Proteobacteria",
-                                        "Planctomycetes","Verrucomicrobia"),
+                                        "Planctomycetota","Verrucomicrobiota"),
                           Phylum,"Other Bacteria"),
          curated = ifelse(curated == "Proteobacteria",Class,curated),
-         curated = ifelse(Phylum == "Proteobacteria" &
-                            !(Class %in% c("Alphaproteobacteria",
-                                           "Gammaproteobacteria")),
-                          "Other Proteobacteria",curated),
          curated = ifelse(curated == "Alphaproteobacteria" &
                             Order %in% c("Rhodobacterales",
                                          "Rhodospirillales", "Rickettsiales",
-                                         "SAR11_clade","Sphingomonadales"),
+                                         "SAR11 clade","Sphingomonadales"),
                           Order,curated),
          curated = ifelse(curated == "Alphaproteobacteria", "Other Alphaproteobacteria",curated),
          curated = ifelse(curated=="Gammaproteobacteria" &
-                            Order %in% c("Alteromonadales","Cellvibrionales" ,
-                                         "Pseudomonadales", "Oceanospirillales"),
-                          Order,curated),
-         curated = ifelse(curated=="Gammaproteobacteria","Other Gammaproteobacteria",curated),
-         curated = ifelse(curated=="Bacteroidetes" &
-                            Class == "Flavobacteriia", Class,curated),
-         curated = ifelse(curated=="Bacteroidetes" &
-                            Class == "Sphingobacteriia", Class,curated),
-         curated = ifelse(curated=="Bacteroidetes", "Other Bacteroidetes",curated),
+                            Order %in% c( "Pseudomonadales",
+                                          "Cellvibrionales",
+                                          "Oceanospirillales",
+                                          'Enterobacterales'),
+                          Order, curated),
+         curated = ifelse(Order=="Alteromonadales" &
+                            Family %in% c("Alteromonadaceae"),
+                          Family, curated),
+         curated = ifelse(curated %in% c("Gammaproteobacteria", 'Enterobacterales', 'Pseudomonadales'),
+                          "Other Gammaproteobacteria",curated),
+         curated = ifelse(curated=="Bacteroidota" &
+                            Order == "Flavobacteriales", Order,curated),
+         curated = ifelse(curated=="Bacteroidota", "Other Bacteroidota",curated),
          curated = ifelse(curated=="Cyanobacteria" &
-                            Genus %in% c("Synechococcus"), Genus,curated),
-         curated = ifelse(curated=="Cyanobacteria","Other Cyanobacteria",curated)) 
+                            Family %in% "Cyanobiaceae",
+                          Family, curated),
+         curated = ifelse(curated=="Cyanobacteria","Other Bacteria",curated)) 
 
 
 tax.raw$curated <- gsub("Oceanospirillales",  "Gam-Oceanospirillales", tax.raw$curated)
 tax.raw$curated <- gsub("Cellvibrionales",  "Gam-Cellvibrionales", tax.raw$curated)
-tax.raw$curated <- gsub("Alteromonadales",  "Gam-Alteromonadales", tax.raw$curated)
+tax.raw$curated <- gsub("Alteromonadaceae",  "Gam-Alteromonadaceae", tax.raw$curated)
 tax.raw$curated <- gsub("Enterobacteriales",  "P_Gam_Enterobacteriales", tax.raw$curated)
 tax.raw$curated <- gsub("Pseudomonadales",  "P_Gam_Pseudomonadales", tax.raw$curated)
-tax.raw$curated <- gsub("Vibriorales",  "P_Gam_Vibriorales", tax.raw$curated)
-tax.raw$curated <- gsub("Sphingobacteriia",  "B_Sphingobacteriia", tax.raw$curated)
 tax.raw$curated <- gsub("Rhodobacterales",  "Alp-Rhodobacterales", tax.raw$curated)
 tax.raw$curated <- gsub("Rhodospirillales",  "P_Alp_Rhodospirillales", tax.raw$curated)
-tax.raw$curated <- gsub("SAR11_clade",  "Alp-SAR11 clade", tax.raw$curated)
+tax.raw$curated <- gsub("SAR11 clade",  "Alp-SAR11 clade", tax.raw$curated)
 tax.raw$curated <- gsub("Sphingomonadales",  "Alp-Sphingomonadales", tax.raw$curated)
 tax.raw$curated <- gsub("Rickettsiales",  "Alp-Rickettsiales", tax.raw$curated)
 
 #With Isabel we agreed into change some of the curated levels, so I am
 #doing it here
 # rewritten 23 march 2023
-tax.raw$curated <- gsub("B_Sphingobacteriia",  "Other Bacteroidetes", tax.raw$curated)
 tax.raw$curated <- gsub( "P_Alp_Rhodospirillales", "Other Alphaproteobacteria", tax.raw$curated)
 tax.raw$curated <- gsub("P_Gam_Pseudomonadales", "Other Gammaproteobacteria", tax.raw$curated)
 
 
 tax.raw$curated <- factor(tax.raw$curated, levels = tax.order)
+tax.raw$curated %>% unique() %>% sort()
 
 ```
 
@@ -329,6 +329,8 @@ phylo.rem <- prune_taxa(taxa.remove,phylo.rem)
 
 phylo.rem
 
+
+
 ```
 
 
@@ -350,7 +352,10 @@ fraction <- decostand(as.numeric(sample_data(phylo.raref)$fraction),
                       "range")
 
 # To change in case there is major modifications 
-nich.df <- niche.val(abund.raref, fraction, n = 1000)
+#nich.df <- niche.val(abund.raref, fraction, n = 1000)
+#write_rds(nich.df, file = '../data/robjects/nicheval.rds')
+
+nich.df <- read_rds('../data/robjects/nicheval.rds')
 
 pan <- nich.df %>% 
   rownames_to_column(var = "asv") %>%
