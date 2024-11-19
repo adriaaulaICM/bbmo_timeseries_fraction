@@ -21,3 +21,4 @@ You will need some minimal packages for running the scripts. For most analysis:
 - [tidyverse](https://www.tidyverse.org/): data wrangling, visualization and general purpose package.
 - [phyloseq](https://joey711.github.io/phyloseq/): specific microbiome experiment functions. 
 - [lomb](https://cran.r-project.org/web/packages/lomb/index.html): seasonality testing.
+- [EcoUtils](https://github.com/GuillemSalazar/EcolUtils): PAN-index calculation. 
